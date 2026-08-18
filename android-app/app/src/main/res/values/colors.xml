@@ -1,0 +1,11 @@
+<resources>
+    <color name="bg">#0B0D12</color>
+    <color name="surface">#161A22</color>
+    <color name="surface_alt">#1E2430</color>
+    <color name="text_primary">#EEF1F5</color>
+    <color name="text_secondary">#9AA2B1</color>
+    <color name="accent">#4A6BFF</color>
+    <color name="live_green">#4ADE80</color>
+    <color name="off_red">#F87171</color>
+    <color name="ic_launcher_background">#4A6BFF</color>
+</resources>

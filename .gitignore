@@ -1,0 +1,16 @@
+# Android / Android Studio
+android-app/.gradle/
+android-app/.idea/
+android-app/local.properties
+android-app/**/build/
+android-app/**/*.iml
+android-app/captures/
+android-app/.cxx/
+ 
+# Node / servidor
+server/node_modules/
+server/npm-debug.log*
+ 
+# Varios
+.DS_Store
+*.log
