@@ -7,5 +7,10 @@
     <color name="accent">#4A6BFF</color>
     <color name="live_green">#4ADE80</color>
     <color name="off_red">#F87171</color>
+    <!-- Botones grandes de fuente/audio: encendido = amarillo, apagado = morado. -->
+    <color name="state_on">#FFC93C</color>
+    <color name="state_on_text">#1A1300</color>
+    <color name="state_off">#6D3FE0</color>
+    <color name="state_off_text">#EEF1F5</color>
     <color name="ic_launcher_background">#4A6BFF</color>
 </resources>

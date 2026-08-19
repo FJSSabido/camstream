@@ -16,13 +16,25 @@ import java.io.RandomAccessFile
  * dispositivo: música, vídeo, juegos...) usando AudioPlaybackCaptureConfiguration,
  * disponible desde Android 10 (API 29).
  *
- * LIMITACIÓN CONOCIDA E IMPORTANTE: la librería WebRTC para Android no ofrece, sin
- * modificar su código nativo, una forma de sustituir su fuente de audio interna por
- * una grabación externa como esta. Por eso, en esta primera versión, el audio interno
- * capturado aquí NO se mezcla en directo dentro de la emisión WebRTC: se graba en
- * paralelo a un archivo .wav en el almacenamiento privado de la app mientras estás
- * emitiendo. Es una base real y funcional (no un mock) sobre la que se podría construir
- * en el futuro la mezcla en directo, con más tiempo de desarrollo o código nativo.
+ * CÓMO LLEGA A QUIEN VE LA TRANSMISIÓN: se investigó a fondo la vía de "mezclarlo"
+ * dentro de la propia pista de audio de WebRTC (la que usa el micrófono) y no es
+ * viable sin forkear/recompilar el código Java interno de la librería WebRTC — su
+ * único punto de enganche público (`setSamplesReadyCallback`) entrega una COPIA de
+ * las muestras, no la referencia real que se codifica y se envía, así que modificarla
+ * ahí no tiene ningún efecto en lo que le llega al espectador.
+ *
+ * En su lugar, cada trozo de audio capturado aquí se manda por un DataChannel de
+ * WebRTC — un canal de datos dentro de la MISMA conexión que ya existe con cada
+ * espectador, sin abrir nada nuevo — y el navegador lo reproduce con la Web Audio API
+ * en paralelo al audio del micrófono (ver `watch.html`): quien mira los oye a la vez,
+ * mezclados de forma natural por el propio altavoz/auriculares. Es una solución real
+ * con Kotlin + JavaScript estándar, sin código nativo ni forks de WebRTC. Al ir por un
+ * canal de datos aparte (no por el pipeline de audio "serio" de WebRTC) puede notarse
+ * algún pequeño desajuste de sincronía o algún corte puntual en redes muy inestables;
+ * en redes normales no debería notarse.
+ *
+ * Además, en paralelo se sigue guardando una copia íntegra a un archivo .wav en el
+ * almacenamiento privado de la app — útil como respaldo o para comprobar la captura.
  *
  * Solo funciona capturando audio de "reproducción" de otras apps (música, vídeo, juegos
  * con USAGE_MEDIA/USAGE_GAME); Android no permite a apps normales capturar sonidos de
@@ -32,14 +44,19 @@ class InternalAudioCapturer(
     private val mediaProjection: MediaProjection,
     private val outputDir: File,
     private val onError: (String) -> Unit,
-    private val onFileReady: (File) -> Unit
+    private val onFileReady: (File) -> Unit,
+    private val onPcmChunk: (ByteArray) -> Unit
 ) {
     private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
     @Volatile private var running = false
 
     companion object {
-        private const val SAMPLE_RATE = 48000
+        // OJO: este valor tiene que coincidir con INTERNAL_AUDIO_SAMPLE_RATE en
+        // server/public/watch.html — es el navegador quien reconstruye el audio a
+        // partir de las muestras PCM16 crudas que le llegan por el DataChannel, y
+        // necesita saber a qué frecuencia se grabaron.
+        const val SAMPLE_RATE = 48000
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -79,18 +96,44 @@ class InternalAudioCapturer(
                 var pcmBytes = 0L
                 val raf = RandomAccessFile(file, "rw")
                 raf.write(ByteArray(44)) // hueco para la cabecera WAV, se rellena al final
-                val buffer = ByteArray(minBuf)
+                // Trozos pequeños (~20ms a 48kHz) para que la latencia hasta el
+                // espectador se note lo menos posible.
+                val chunkFrames = (SAMPLE_RATE * 0.02).toInt().coerceAtLeast(1)
+                val buffer = ByteArray(minOf(minBuf, chunkFrames * 2).coerceAtLeast(320))
                 try {
                     while (running) {
-                        val read = record.read(buffer, 0, buffer.size)
-                        if (read > 0) {
-                            raf.write(buffer, 0, read)
-                            pcmBytes += read
+                        // record.read() es una llamada BLOQUEANTE: si se libera el
+                        // AudioRecord desde stop() mientras este hilo sigue leyendo, puede
+                        // lanzar una excepción. La capturamos aquí dentro para que este
+                        // hilo nunca termine con una excepción sin capturar — eso, en
+                        // Android, mata la app entera (aunque sea un hilo de fondo), no
+                        // solo esta grabación.
+                        val read = try {
+                            record.read(buffer, 0, buffer.size)
+                        } catch (e: Exception) {
+                            break
+                        }
+                        when {
+                            read > 0 -> {
+                                raf.write(buffer, 0, read)
+                                pcmBytes += read
+                                try {
+                                    onPcmChunk(buffer.copyOf(read))
+                                } catch (e: Exception) {
+                                    // Un fallo puntual al reenviar el trozo no debe tirar
+                                    // abajo la captura entera.
+                                }
+                            }
+                            read < 0 -> break // código de error de AudioRecord: no hay más que leer
                         }
                     }
+                } catch (e: Exception) {
+                    // Cualquier otro fallo inesperado (p. ej. al escribir en disco): lo
+                    // ignoramos aquí para no tirar abajo el proceso entero por un hilo
+                    // secundario de una función experimental.
                 } finally {
-                    finalizeWavHeader(raf, pcmBytes)
-                    raf.close()
+                    try { finalizeWavHeader(raf, pcmBytes) } catch (e: Exception) { /* ignorar */ }
+                    try { raf.close() } catch (e: Exception) { /* ignorar */ }
                     onFileReady(file)
                 }
             }.apply { start() }
@@ -101,9 +144,13 @@ class InternalAudioCapturer(
 
     fun stop() {
         running = false
-        thread?.join(500)
-        thread = null
+        // Paramos el AudioRecord ANTES de esperar al hilo: así, si estaba bloqueado dentro
+        // de record.read(), se desbloquea enseguida en vez de quedarse esperando datos que
+        // ya no van a llegar (antes se esperaba solo 500ms y, si no le daba tiempo, el hilo
+        // se quedaba huérfano en segundo plano hasta que read() decidiera devolver algo).
         try { audioRecord?.stop() } catch (e: Exception) { /* ignorar */ }
+        thread?.join(1000)
+        thread = null
         audioRecord?.release()
         audioRecord = null
     }

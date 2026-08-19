@@ -32,6 +32,50 @@
     background: #000; overflow: hidden;
   }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  /* Cuando hay rotación activa, el tamaño y la posición del vídeo principal los
+     calcula JavaScript (layoutVideo) para que quepa bien en cualquier ángulo;
+     por eso pasa a position:absolute solo en ese momento (ver layoutVideo). */
+  .rotate-btn {
+    position: absolute; bottom: 14px; z-index: 6;
+    width: 44px; height: 44px; border-radius: 50%; border: none;
+    background: rgba(20,22,28,0.65); color: #eef1f5; font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; backdrop-filter: blur(2px);
+  }
+  .rotate-btn:active { background: rgba(20,22,28,0.9); }
+  #rotateCcwBtn { left: 14px; }
+  #rotateBtn { left: 66px; }
+  .volume-control {
+    position: absolute; bottom: 14px; right: 14px; z-index: 6;
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(20,22,28,0.65); border-radius: 999px; padding: 6px 14px 6px 6px;
+    backdrop-filter: blur(2px);
+  }
+  .volume-control button {
+    width: 32px; height: 32px; border-radius: 50%; border: none; flex: none;
+    background: transparent; color: #eef1f5; font-size: 17px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .volume-control button:active { background: rgba(255,255,255,0.15); }
+  .volume-control input[type="range"] { width: 80px; accent-color: #7c9cff; cursor: pointer; }
+  /* Iconos de "sin señal": avisan de que quien emite ha apagado el vídeo y/o el
+     micrófono, en vez de dejar la imagen congelada sin explicación. La barra
+     diagonal (::after) es la misma idea visual que usan Zoom/Meet para "cámara
+     apagada" o "micro apagado". */
+  .signal-badge {
+    position: absolute; top: 14px; z-index: 6;
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: rgba(20,22,28,0.75); color: #eef1f5; font-size: 18px;
+    display: none; align-items: center; justify-content: center;
+    backdrop-filter: blur(2px);
+  }
+  .signal-badge.show { display: flex; }
+  .signal-badge::after {
+    content: ''; position: absolute; width: 3px; height: 26px;
+    background: #f87171; border-radius: 2px; transform: rotate(45deg);
+  }
+  #noVideoBadge { left: 14px; }
+  #noAudioBadge { right: 14px; }
   .overlay {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     flex-direction: column; gap: 14px; text-align: center; padding: 24px;
@@ -49,6 +93,12 @@
     background: #4a6bff; color: white; cursor: pointer;
   }
   .btn:active { opacity: 0.8; }
+  .pw-input {
+    width: 100%; max-width: 260px; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid #2a2f3a; background: #12151c; color: #eef1f5;
+    font-size: 14px; text-align: center;
+  }
+  .pw-input:focus { outline: none; border-color: #4a6bff; }
   footer { padding: 10px 16px; font-size: 11px; color: #565d6b; text-align: center; }
 </style>
 </head>
@@ -60,6 +110,14 @@
   </header>
   <div class="video-area">
     <video id="remoteVideo" playsinline autoplay muted></video>
+    <button id="rotateCcwBtn" class="rotate-btn" type="button" title="Girar 90° a la izquierda" aria-label="Girar a la izquierda">⟲</button>
+    <button id="rotateBtn" class="rotate-btn" type="button" title="Girar 90° a la derecha" aria-label="Girar a la derecha">⟳</button>
+    <div id="volumeControl" class="volume-control">
+      <button id="muteBtn" type="button" title="Silenciar / activar sonido" aria-label="Silenciar o activar sonido">🔊</button>
+      <input id="volumeSlider" type="range" min="0" max="100" value="100" aria-label="Volumen" />
+    </div>
+    <div id="noVideoBadge" class="signal-badge" title="Quien emite tiene el vídeo apagado" aria-label="Sin señal de vídeo">🎥</div>
+    <div id="noAudioBadge" class="signal-badge" title="Quien emite tiene el micrófono apagado" aria-label="Sin señal de audio">🎙️</div>
     <div id="overlay" class="overlay">
       <div class="spinner"></div>
       <p>Conectando con la señalización…</p>
@@ -71,10 +129,128 @@
 <script>
 (function () {
   const roomId = decodeURIComponent(location.pathname.split('/watch/')[1] || '').replace(/\/$/, '');
-  const key = new URLSearchParams(location.search).get('key') || '';
+  let key = new URLSearchParams(location.search).get('key') || '';
   const statusEl = document.getElementById('status');
   const overlayEl = document.getElementById('overlay');
   const videoEl = document.getElementById('remoteVideo');
+  const rotateBtn = document.getElementById('rotateBtn');
+  const rotateCcwBtn = document.getElementById('rotateCcwBtn');
+  const videoAreaEl = document.querySelector('.video-area');
+  const muteBtn = document.getElementById('muteBtn');
+  const volumeSlider = document.getElementById('volumeSlider');
+  const noVideoBadge = document.getElementById('noVideoBadge');
+  const noAudioBadge = document.getElementById('noAudioBadge');
+
+  // --- Iconos de "sin señal" ------------------------------------------------
+  // hasVideo/hasAudio son "null" mientras no sabemos con certeza si quien emite
+  // tiene el vídeo/micrófono encendidos — hasta que llega o bien el mensaje
+  // "state" (la fuente autorizada: lo manda la app en cuanto nos conectamos y
+  // cada vez que cambia) o bien, como respaldo, la primera pista de vídeo.
+  let knownHasVideo = null;
+  let knownHasAudio = null;
+
+  function updateSignalBadges() {
+    noVideoBadge.classList.toggle('show', knownHasVideo === false);
+    noAudioBadge.classList.toggle('show', knownHasAudio === false);
+  }
+
+  function resetSignalBadges() {
+    knownHasVideo = null;
+    knownHasAudio = null;
+    updateSignalBadges();
+  }
+
+  // --- Volumen / silencio --------------------------------------------------
+  // El vídeo arranca silenciado (atributo "muted") porque los navegadores solo
+  // permiten reproducir en automático así — el usuario tiene que interactuar
+  // primero para poder oír sonido (ver el intento de pc.ontrack más abajo, con
+  // su aviso "Toca para activar el sonido" como último recurso si ni así deja).
+  // Este control (botón + regla de volumen) es independiente de esa política
+  // inicial: deja silenciar/graduar el sonido en cualquier momento.
+  let lastVolume = 1;
+
+  function updateMuteIcon() {
+    muteBtn.textContent = (videoEl.muted || videoEl.volume === 0) ? '🔇' : '🔊';
+  }
+
+  function unmuteTo(vol) {
+    videoEl.muted = false;
+    videoEl.volume = vol;
+    volumeSlider.value = Math.round(vol * 100);
+    if (vol > 0) lastVolume = vol;
+    videoEl.play().catch(() => { /* el navegador seguirá pidiendo un toque directo sobre el vídeo */ });
+    updateMuteIcon();
+  }
+
+  muteBtn.addEventListener('click', () => {
+    if (videoEl.muted || videoEl.volume === 0) {
+      unmuteTo(lastVolume > 0 ? lastVolume : 1);
+    } else {
+      lastVolume = videoEl.volume;
+      videoEl.muted = true;
+      updateMuteIcon();
+    }
+  });
+
+  volumeSlider.addEventListener('input', () => {
+    const v = Number(volumeSlider.value) / 100;
+    videoEl.volume = v;
+    videoEl.muted = v === 0;
+    if (v > 0) lastVolume = v;
+    updateMuteIcon();
+  });
+
+  videoEl.addEventListener('volumechange', updateMuteIcon);
+
+  // --- Girar la vista (útil si el móvil que emite está en una orientación
+  // distinta a la que le viene bien a quien mira) -----------------------------
+  let rotationDeg = 0;
+
+  function layoutVideo() {
+    if (rotationDeg === 0) {
+      // Caso normal (sin girar): dejamos que lo resuelva el CSS de siempre
+      // (width/height 100% + object-fit: contain), es lo más fiable.
+      videoEl.style.position = '';
+      videoEl.style.left = '';
+      videoEl.style.top = '';
+      videoEl.style.width = '100%';
+      videoEl.style.height = '100%';
+      videoEl.style.transform = '';
+      return;
+    }
+
+    const vw = videoEl.videoWidth || videoAreaEl.clientWidth || 16;
+    const vh = videoEl.videoHeight || videoAreaEl.clientHeight || 9;
+    const cw = videoAreaEl.clientWidth;
+    const ch = videoAreaEl.clientHeight;
+    const swapped = rotationDeg === 90 || rotationDeg === 270;
+    // Ajustamos la escala al rectángulo YA girado, para que quepa entero en
+    // el hueco disponible sea cual sea el ángulo.
+    const fitW = swapped ? vh : vw;
+    const fitH = swapped ? vw : vh;
+    const scale = Math.min(cw / fitW, ch / fitH);
+
+    videoEl.style.position = 'absolute';
+    videoEl.style.left = '50%';
+    videoEl.style.top = '50%';
+    videoEl.style.width = (vw * scale) + 'px';
+    videoEl.style.height = (vh * scale) + 'px';
+    videoEl.style.transform = `translate(-50%, -50%) rotate(${rotationDeg}deg)`;
+  }
+
+  // Sentido horario (derecha) y antihorario (izquierda) — cada toque suma o
+  // resta 90°, tantas veces como haga falta hasta encontrar el ángulo correcto.
+  rotateBtn.addEventListener('click', () => {
+    rotationDeg = (rotationDeg + 90) % 360;
+    layoutVideo();
+  });
+  rotateCcwBtn.addEventListener('click', () => {
+    rotationDeg = (rotationDeg + 270) % 360; // +270 == -90 en módulo 360, sin negativos
+    layoutVideo();
+  });
+  videoEl.addEventListener('loadedmetadata', layoutVideo);
+  window.addEventListener('resize', layoutVideo);
+  window.addEventListener('orientationchange', layoutVideo);
 
   function setStatus(text, cls) {
     statusEl.textContent = text;
@@ -106,6 +282,37 @@
   let ws = null;
   let reconnectTimer = null;
   let gotStream = false;
+  // true mientras se espera a que el usuario escriba la contraseña: en ese
+  // estado NO reconectamos solos cada 2,5s (nos quedaríamos reintentando con
+  // una contraseña que ya sabemos que está mal/vacía).
+  let awaitingPassword = false;
+
+  // --- Contraseña de la sala ---------------------------------------------
+  // El enlace que comparte quien emite no lleva la contraseña incrustada (por
+  // seguridad, se da aparte). Si la sala tiene contraseña, el servidor
+  // rechaza la conexión con el mensaje exacto "Contraseña incorrecta." — en
+  // ese caso, en vez de solo mostrar el error, pedimos la contraseña aquí
+  // mismo y reintentamos la conexión con lo que escriba el usuario.
+  function showPasswordPrompt(message) {
+    awaitingPassword = true;
+    setStatus('Con contraseña', 'off');
+    showOverlay(
+      '<p>' + message + '</p>' +
+      '<input id="pwInput" type="password" placeholder="Contraseña de la sala" class="pw-input" autocomplete="off" />' +
+      '<button class="btn" id="pwSubmit">Entrar</button>'
+    );
+    const input = document.getElementById('pwInput');
+    const submitBtn = document.getElementById('pwSubmit');
+    const trySubmit = () => {
+      key = input.value;
+      awaitingPassword = false;
+      showOverlay('<div class="spinner"></div><p>Conectando…</p>');
+      connect();
+    };
+    submitBtn.onclick = trySubmit;
+    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') trySubmit(); });
+    input.focus();
+  }
 
   function wsUrl() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -117,6 +324,7 @@
     clearTimeout(reconnectTimer);
     setStatus('Conectando…');
     showOverlay('<div class="spinner"></div><p>Conectando con la señalización…</p>');
+    resetSignalBadges(); // no sabemos el estado de vídeo/audio hasta que llegue el nuevo "state"
 
     ws = new WebSocket(wsUrl());
 
@@ -126,6 +334,16 @@
       const msg = JSON.parse(ev.data);
 
       if (msg.type === 'error') {
+        if (msg.message === 'Contraseña incorrecta.') {
+          const wasEmpty = !key;
+          ws.close();
+          showPasswordPrompt(
+            wasEmpty
+              ? 'Esta sala está protegida con contraseña.'
+              : 'Contraseña incorrecta. Inténtalo de nuevo.'
+          );
+          return;
+        }
         setStatus('Error', 'off');
         showOverlay('<p>' + (msg.message || 'No se pudo conectar.') + '</p>');
         ws.close();
@@ -144,7 +362,17 @@
         gotStream = false;
         setStatus('Sin emisión', 'off');
         showOverlay('<p>La emisión ha terminado o se ha desconectado.</p>');
+        resetSignalBadges();
         if (pc) { pc.close(); pc = null; }
+        return;
+      }
+
+      if (msg.type === 'state') {
+        // Mensaje autorizado desde la app: dice si hay vídeo y/o audio saliendo
+        // AHORA MISMO, tanto al conectarnos como cada vez que cambia en caliente.
+        knownHasVideo = !!msg.hasVideo;
+        knownHasAudio = !!msg.hasAudio;
+        updateSignalBadges();
         return;
       }
 
@@ -166,6 +394,7 @@
     };
 
     ws.onclose = () => {
+      if (awaitingPassword) return; // esperando a que el usuario escriba la contraseña
       if (!gotStream) {
         setStatus('Reconectando…', 'off');
       }
@@ -188,13 +417,20 @@
     pc.ontrack = (ev) => {
       gotStream = true;
       videoEl.srcObject = ev.streams[0];
+      // El mensaje "state" (ver ws.onmessage) es la fuente autorizada de si hay
+      // vídeo/audio — esto es solo un respaldo por si, por lo que sea, todavía no
+      // ha llegado ningún "state" cuando entra la primera pista.
+      if (knownHasVideo === null) {
+        knownHasVideo = ev.streams[0].getVideoTracks().length > 0;
+        updateSignalBadges();
+      }
+      layoutVideo();
       hideOverlay();
       setStatus('En directo', 'live');
       videoEl.play().catch(() => {
         showOverlay('<p>Toca para activar el sonido y reproducir</p><button class="btn" id="playBtn">Reproducir</button>');
         document.getElementById('playBtn').onclick = () => {
-          videoEl.muted = false;
-          videoEl.play();
+          unmuteTo(lastVolume > 0 ? lastVolume : 1);
           hideOverlay();
         };
       });
@@ -208,9 +444,10 @@
     };
   }
 
-  // Permitir activar sonido tocando el vídeo (política de autoplay de los navegadores)
+  // Permitir activar sonido tocando el vídeo (política de autoplay de los navegadores),
+  // además del botón/regla de volumen de arriba.
   videoEl.addEventListener('click', () => {
-    if (videoEl.muted) { videoEl.muted = false; videoEl.play(); }
+    if (videoEl.muted) unmuteTo(lastVolume > 0 ? lastVolume : 1);
   });
 
   connect();

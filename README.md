@@ -3,7 +3,7 @@
 App de Android que emite tu cámara (trasera o delantera) o la pantalla del móvil por
 WebRTC, con un enlace `https://tu-servidor/watch/sala` que cualquiera puede abrir en un
 navegador para verlo en directo, sin instalar nada. Incluye micrófono con botón de
-silenciar y una función experimental de audio interno (ver limitaciones más abajo).
+silenciar.
 
 El vídeo/audio viaja siempre **directo entre el móvil y quien lo ve** (peer-to-peer, como
 hace VDO.Ninja). El servidor que tienes que desplegar solo hace de "intermediario de
@@ -88,29 +88,87 @@ Alt+Enter → "Implement members" sobre la clase anónima y déjalo con el cuerp
 
 1. Abre la app, pon la URL de tu servidor desplegado (paso 1) y un nombre de sala (o deja
    el que se genera solo).
-2. Elige **Cámara** o **Pantalla**.
-3. Concede los permisos que te pida (cámara/micrófono, y en el caso de pantalla, la
-   confirmación del sistema para grabarla).
+2. En la tarjeta **🎛️ Fuente y audio**, toca el botón grande de la fuente con la que
+   quieres empezar: **🤳 Frontal**, **📷 Trasera** o **🖥️ Pantalla** (amarillo = activa,
+   morado = apagada). El botón **🎙️ Micrófono** funciona igual: amarillo = encendido. El
+   vídeo es opcional igual que el audio: si tocas la fuente que ya está activa, se apaga
+   — puedes dejar los tres botones de fuente apagados a la vez (solo se emite audio) o
+   el micrófono apagado (solo se emite vídeo), lo que necesites en cada momento.
+3. Concede los permisos que te pida (cámara y micrófono se piden siempre, aunque
+   empieces compartiendo pantalla, para poder cambiar de fuente más adelante sin
+   cortar la emisión; para pantalla, además, la confirmación del sistema para
+   grabarla — en Android 13+ ese mismo aviso del sistema ya te deja elegir entre
+   grabar la pantalla completa o solo una app/ventana concreta).
 4. Pulsa **Iniciar transmisión**. En unos segundos aparece el enlace y el código QR.
 5. Comparte ese enlace (o el QR) con quien quieras que lo vea — lo abren en cualquier
    navegador (Chrome, Safari, Firefox...) y ya está, sin instalar nada.
-6. Puedes silenciar el micrófono, cambiar de cámara (frontal/trasera) o parar la
-   transmisión en cualquier momento desde la app o desde la notificación.
+6. **Con la transmisión ya en marcha puedes seguir tocando esos mismos botones para
+   cambiar de fuente o de micrófono EN CALIENTE, sin parar ni reiniciar nada:** pasar
+   de cámara trasera a pantalla (o al revés), encender/apagar el micrófono, o apagar
+   el vídeo del todo (dejando solo audio), se nota en el enlace del espectador en
+   cuestión de un segundo. Solo puede haber una cámara/pantalla activa a la vez (nunca
+   las dos cámaras ni cámara+pantalla juntas) — por eso los tres botones de fuente se
+   comportan como un selector, pero con la posibilidad de dejarlos los tres apagados: al
+   marcar uno se desmarca el anterior, y tocar el que ya está activo lo apaga sin
+   marcar ningún otro. Cambiar A pantalla (tanto al empezar como más tarde) siempre
+   vuelve a pedir la confirmación del sistema para grabarla: es una limitación de
+   Android, no se puede reutilizar un permiso de captura de pantalla anterior. Cada
+   espectador se entera al instante de si hay vídeo y/o audio saliendo — con dos
+   iconos sobre el vídeo (🎥/🎙️ tachados) que aparecen y desaparecen solos en cuanto
+   apagas o enciendes la cámara/pantalla o el micrófono, tanto si ya estaban viendo
+   como si se conectan después.
+7. También puedes parar la transmisión en cualquier momento desde la app o desde la
+   notificación persistente.
+
+### Calidad de imagen
+
+La cámara captura ahora a la resolución MÁXIMA que ofrezca el sensor, hasta 4K (2160p) —
+ya no se limita artificialmente a 1080p. El techo de bitrate sube a la vez con la
+resolución real que se esté usando (2,5 Mbps a resoluciones bajas, hasta 20 Mbps en 4K),
+para que más resolución venga siempre acompañada de más bits con los que dibujarla — subir
+solo la resolución sin subir el bitrate es lo que produce pixelado, no lo arregla. Siguen
+siendo techos, no mínimos fijos: si la red no da para tanto, WebRTC reduce el bitrate
+automáticamente para no cortar la transmisión, y reparte el recorte entre nitidez y
+fluidez según haga falta en cada momento (nunca sacrifica siempre lo mismo) — se probaron
+los dos extremos (priorizar solo nitidez, priorizar solo fluidez) y ambos se notaban mal
+de una manera distinta con 4K de por medio: uno se veía nítido pero a saltos, el otro
+fluido pero pixelado. Ninguno de estos ajustes le pide más al hardware del móvil que los
+otros — es el mismo techo de bitrate y la misma resolución de captura, solo cambia cómo se
+reparten cuando la red no da para todo.
+
+Ten en cuenta que grabar en 4K exige bastante más al procesador/GPU del móvil que 1080p —
+en emisiones largas puede notarse más calentamiento y más consumo de batería que antes. Si
+prefieres priorizar autonomía/temperatura sobre nitidez máxima, se puede volver a bajar el
+techo de resolución (`MAX_CAPTURE_WIDTH`/`MAX_CAPTURE_HEIGHT` en `WebRtcClient.kt`).
+
+### Vista para el espectador
+
+Quien ve la transmisión puede girar la imagen con los botones ⟲ (izquierda) y ⟳
+(derecha) que aparecen sobre el vídeo — cada toque gira 90° más en ese sentido, tantas
+veces como haga falta hasta encontrar el ángulo correcto (útil si quien emite sujeta el
+móvil en un ángulo distinto al que le viene bien a quien mira). También tiene su propio
+control de sonido (botón 🔊/🔇 + regla de volumen, abajo a la derecha del vídeo):
+silenciar o graduar el volumen ahí es cosa de cada espectador, no afecta a los demás ni a
+quien emite. Nada de esto cambia nada en el móvil que emite, solo cómo se ve/oye en ese
+navegador en concreto.
+
+Arriba a la izquierda y a la derecha del vídeo aparecen, solo cuando hace falta, dos
+iconos de "sin señal" (una cámara 🎥 y un micrófono 🎙️, cada uno con una raya cruzada,
+al estilo de Zoom/Meet): avisan de si quien emite tiene el vídeo y/o el micrófono
+apagados en ese momento, en vez de dejar la imagen congelada sin explicación. Se
+actualizan solos y al instante en cuanto quien emite cambia de fuente o de micrófono, sin
+que el espectador tenga que recargar la página — esto SÍ viaja por el servidor de
+señalización (a diferencia del vídeo/audio, que va directo), porque es justo el tipo de
+aviso pequeño para el que existe ese servidor.
+
+Si la sala tiene contraseña, el navegador la pide con un formulario propio en cuanto
+detecta que hace falta (no hace falta compartir la contraseña dentro del enlace) —si la
+escribe mal, puede volver a intentarlo sin recargar la página.
 
 Una sala = un móvil emitiendo. Pueden verla varias personas a la vez.
 
 ## Limitaciones conocidas
 
-- **Audio interno (experimental) no se mezcla todavía en directo.** La librería de
-  WebRTC para Android no permite, sin tocar su código nativo, sustituir su fuente de
-  audio por una grabación externa. Por eso, cuando activas "Audio interno" (solo
-  disponible compartiendo pantalla, Android 10+), la app graba el audio interno del
-  teléfono en paralelo a un archivo `.wav` en el almacenamiento de la app
-  (`Android/data/com.miconstelacion.camstream/files/audio_interno/`), pero **no** se
-  envía mezclado con el micrófono en la emisión en directo. Es una base de código real y
-  funcional para seguir desarrollando la mezcla en directo más adelante (requeriría
-  código nativo/C++ o forkear partes internas de la librería WebRTC — no era seguro
-  improvisarlo sin poder probarlo antes de entregártelo).
 - **Sin servidor TURN.** Con redes normales (WiFi doméstica, datos móviles) funciona con
   los servidores STUN públicos incluidos. En redes muy restrictivas (WiFi corporativas,
   algunas 4G/5G con NAT simétrico) puede que la conexión P2P no consiga establecerse. Si
@@ -121,7 +179,8 @@ Una sala = un móvil emitiendo. Pueden verla varias personas a la vez.
   segundo recibe un error. Usa nombres de sala distintos si vais a emitir varias
   personas.
 - **La contraseña de sala es una protección básica**, no cifrado — evita que cualquiera
-  que adivine el nombre de la sala pueda verla, pero viaja en la URL. No la uses para
+  que adivine el nombre de la sala pueda verla, pero el servidor la comprueba en texto
+  plano (sin más cifrado que el de la propia conexión HTTPS/WSS). No la uses para
   contenido realmente sensible.
 - No se ha podido compilar/ejecutar el proyecto en este entorno de trabajo (sin acceso a
   los repositorios de Android), así que, aunque el código se ha escrito con mucho

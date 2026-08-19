@@ -163,7 +163,17 @@ wss.on('connection', (ws, req) => {
     if (!r) return;
 
     if (ws.role === 'host') {
-      // El host manda mensajes dirigidos a un viewer concreto: {type, viewerId, ...}
+      if (msg.type === 'state' && !msg.viewerId) {
+        // A diferencia de offer/answer/candidate (dirigidos a un viewer concreto
+        // con msg.viewerId), un cambio de estado — se ha encendido o apagado el
+        // vídeo o el micrófono — se avisa a TODOS los espectadores conectados a
+        // la vez, para que cada uno actualice sus iconos de "sin señal".
+        for (const viewer of r.viewers.values()) send(viewer, msg);
+        return;
+      }
+      // El host manda el resto de mensajes dirigidos a un viewer concreto:
+      // {type, viewerId, ...} — incluido 'state' cuando SÍ lleva viewerId (para
+      // ponerse al día a un espectador que se acaba de conectar).
       const target = r.viewers.get(msg.viewerId);
       if (target) send(target, msg);
     } else {

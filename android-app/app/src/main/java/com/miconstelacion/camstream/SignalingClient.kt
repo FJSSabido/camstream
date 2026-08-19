@@ -113,6 +113,19 @@ class SignalingClient(
         send(JSONObject().put("type", "candidate").put("viewerId", viewerId).put("candidate", c))
     }
 
+    /**
+     * Avisa de si hay vídeo y/o audio saliendo AHORA MISMO, para que cada espectador
+     * pueda mostrar un icono de "sin señal" en vez de quedarse con la última imagen
+     * congelada sin explicación. Sin [viewerId] se manda a TODOS los espectadores
+     * conectados (para avisar de un cambio en caliente); con [viewerId], solo a ese
+     * espectador en concreto (para ponerlo al día justo al conectarse).
+     */
+    fun sendState(hasVideo: Boolean, hasAudio: Boolean, viewerId: String? = null) {
+        val json = JSONObject().put("type", "state").put("hasVideo", hasVideo).put("hasAudio", hasAudio)
+        if (viewerId != null) json.put("viewerId", viewerId)
+        send(json)
+    }
+
     private fun send(json: JSONObject) {
         if (client.isOpen) client.send(json.toString())
     }

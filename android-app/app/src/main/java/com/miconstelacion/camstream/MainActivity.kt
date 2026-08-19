@@ -7,16 +7,18 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.google.android.material.button.MaterialButton
 import com.miconstelacion.camstream.databinding.ActivityMainBinding
 import kotlinx.coroutines.launch
 
@@ -25,9 +27,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: SharedPreferences
 
-    private var useScreenSource = false
-    private var useFrontCamera = false
+    // Configuración "pendiente": la que se usará para ARRANCAR la emisión. Una vez en
+    // marcha, el estado real vive en BroadcastEngine.stateFlow y estos campos dejan de
+    // consultarse (ver currentSource/currentMic).
+    private var pendingSource: VideoSource = VideoSource.BACK_CAMERA
+    private var pendingMicEnabled = true
     private var pendingStart = false
+
+    /** Para qué se está pidiendo permiso de captura de pantalla ahora mismo. */
+    private enum class ScreenPermissionPurpose { START, SWITCH_SOURCE }
+    private var awaitingScreenPermissionFor: ScreenPermissionPurpose? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -42,10 +51,26 @@ class MainActivity : AppCompatActivity() {
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            launchBroadcastService(result.resultCode, result.data)
-        } else {
+        val purpose = awaitingScreenPermissionFor
+        awaitingScreenPermissionFor = null
+
+        if (result.resultCode != Activity.RESULT_OK || result.data == null) {
             Toast.makeText(this, "No se concedió permiso para capturar la pantalla", Toast.LENGTH_LONG).show()
+            updateSourceButtonStates()
+            updateAudioButtonStates()
+            return@registerForActivityResult
+        }
+
+        when (purpose) {
+            ScreenPermissionPurpose.START -> {
+                pendingSource = VideoSource.SCREEN
+                launchBroadcastService(result.data)
+            }
+            ScreenPermissionPurpose.SWITCH_SOURCE -> {
+                pendingSource = VideoSource.SCREEN
+                switchSourceLive(VideoSource.SCREEN, result.data)
+            }
+            null -> { /* nada que hacer */ }
         }
     }
 
@@ -61,26 +86,14 @@ class MainActivity : AppCompatActivity() {
             binding.inputRoomId.setText(randomRoomId())
         }
 
-        binding.toggleSource.addOnButtonCheckedListener { _, checkedId, isChecked ->
-            if (!isChecked) return@addOnButtonCheckedListener
-            useScreenSource = checkedId == binding.btnSourceScreen.id
-            updateSourceDependentViews()
-        }
+        binding.btnSourceFront.setOnClickListener { onSourceButtonClicked(VideoSource.FRONT_CAMERA) }
+        binding.btnSourceBack.setOnClickListener { onSourceButtonClicked(VideoSource.BACK_CAMERA) }
+        binding.btnSourceScreen.setOnClickListener { onSourceButtonClicked(VideoSource.SCREEN) }
 
-        binding.btnSwitchCamera.setOnClickListener {
-            useFrontCamera = !useFrontCamera
-            BroadcastEngine.switchCamera()
-        }
-
-        binding.switchMic.setOnCheckedChangeListener { _, checked ->
-            BroadcastEngine.setMicEnabled(checked)
-        }
-
-        binding.rowInternalAudio.visibility =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) android.view.View.VISIBLE else android.view.View.GONE
+        binding.btnToggleMic.setOnClickListener { onMicButtonClicked() }
 
         binding.btnStartStop.setOnClickListener {
-            if (BroadcastEngine.stateFlow.value.isLive || pendingStart) {
+            if (BroadcastEngine.stateFlow.value.isRunning || pendingStart) {
                 stopBroadcast()
             } else {
                 startBroadcastFlow()
@@ -103,7 +116,8 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent.createChooser(intent, "Compartir enlace"))
         }
 
-        updateSourceDependentViews()
+        updateSourceButtonStates()
+        updateAudioButtonStates()
         observeState()
     }
 
@@ -126,12 +140,70 @@ class MainActivity : AppCompatActivity() {
         return (1..6).map { chars.random() }.joinToString("")
     }
 
-    private fun updateSourceDependentViews() {
-        binding.btnSwitchCamera.visibility = if (useScreenSource) android.view.View.GONE else android.view.View.VISIBLE
-        binding.txtInternalAudioHint.visibility =
-            if (useScreenSource) android.view.View.VISIBLE else android.view.View.GONE
-        binding.switchInternalAudio.isEnabled = useScreenSource
-        if (!useScreenSource) binding.switchInternalAudio.isChecked = false
+    // ---- Fuente de vídeo (cámara frontal/trasera/pantalla) ----
+
+    /**
+     * El vídeo es opcional, igual que el micrófono: tocar la fuente que YA está
+     * activa la apaga (deja la emisión solo con audio) en vez de volver a pedir
+     * permiso o quedarse sin hacer nada — así los tres botones de fuente pueden
+     * estar los tres apagados a la vez, cosa que antes no era posible (siempre
+     * había una cámara/pantalla obligatoriamente encendida).
+     */
+    private fun onSourceButtonClicked(source: VideoSource) {
+        val running = BroadcastEngine.stateFlow.value.isRunning
+        val turningOff = currentSource() == source
+
+        if (turningOff) {
+            pendingSource = VideoSource.NONE
+            if (running) {
+                switchSourceLive(VideoSource.NONE)
+            } else {
+                updateSourceButtonStates()
+                updateAudioButtonStates()
+            }
+            return
+        }
+
+        if (source == VideoSource.SCREEN) {
+            requestScreenPermission(
+                if (running) ScreenPermissionPurpose.SWITCH_SOURCE else ScreenPermissionPurpose.START
+            )
+            return
+        }
+        pendingSource = source
+        if (running) {
+            switchSourceLive(source)
+        } else {
+            updateSourceButtonStates()
+            updateAudioButtonStates()
+        }
+    }
+
+    /** Cambia de fuente con la emisión YA en marcha, sin cortarla. */
+    private fun switchSourceLive(source: VideoSource, data: Intent? = null) {
+        val intent = Intent(this, BroadcastService::class.java).apply {
+            action = BroadcastService.ACTION_SWITCH_SOURCE
+            putExtra(BroadcastService.EXTRA_SOURCE, source.name)
+            putExtra(BroadcastService.EXTRA_PROJECTION_DATA, data)
+        }
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    private fun requestScreenPermission(purpose: ScreenPermissionPurpose) {
+        awaitingScreenPermissionFor = purpose
+        val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
+    }
+
+    // ---- Audio: micrófono ----
+
+    private fun onMicButtonClicked() {
+        if (BroadcastEngine.stateFlow.value.isRunning) {
+            BroadcastEngine.setMicEnabled(!BroadcastEngine.stateFlow.value.micEnabled)
+        } else {
+            pendingMicEnabled = !pendingMicEnabled
+            updateAudioButtonStates()
+        }
     }
 
     // ---- Arranque de la emisión ----
@@ -151,15 +223,18 @@ class MainActivity : AppCompatActivity() {
 
         savePrefs()
 
+        // Se piden cámara y micrófono siempre, sea cual sea la fuente inicial elegida:
+        // así, cambiar a cámara EN CALIENTE más adelante (p. ej. mientras se comparte
+        // pantalla) nunca choca con un permiso que falte a mitad de emisión.
         val needed = mutableListOf<String>()
         needed.add(Manifest.permission.RECORD_AUDIO)
-        if (!useScreenSource) needed.add(Manifest.permission.CAMERA)
+        needed.add(Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         val missing = needed.filter {
-            androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
         }
 
         if (missing.isNotEmpty()) {
@@ -170,15 +245,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun proceedAfterPermissions() {
-        if (useScreenSource) {
-            val manager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
+        if (pendingSource == VideoSource.SCREEN) {
+            requestScreenPermission(ScreenPermissionPurpose.START)
         } else {
-            launchBroadcastService(0, null)
+            launchBroadcastService(null)
         }
     }
 
-    private fun launchBroadcastService(resultCode: Int, projectionData: Intent?) {
+    private fun launchBroadcastService(projectionData: Intent?) {
         pendingStart = true
         binding.btnStartStop.text = "Detener"
         binding.txtStatus.text = "Conectando…"
@@ -188,14 +262,11 @@ class MainActivity : AppCompatActivity() {
             putExtra(BroadcastService.EXTRA_SERVER_URL, binding.inputServerUrl.text?.toString()?.trim())
             putExtra(BroadcastService.EXTRA_ROOM, binding.inputRoomId.text?.toString()?.trim())
             putExtra(BroadcastService.EXTRA_PASSWORD, binding.inputPassword.text?.toString().orEmpty())
-            putExtra(BroadcastService.EXTRA_USE_SCREEN, useScreenSource)
-            putExtra(BroadcastService.EXTRA_USE_FRONT_CAMERA, useFrontCamera)
-            putExtra(BroadcastService.EXTRA_MIC_ENABLED, binding.switchMic.isChecked)
-            putExtra(BroadcastService.EXTRA_INTERNAL_AUDIO, binding.switchInternalAudio.isChecked)
-            putExtra(BroadcastService.EXTRA_PROJECTION_RESULT_CODE, resultCode)
+            putExtra(BroadcastService.EXTRA_SOURCE, pendingSource.name)
+            putExtra(BroadcastService.EXTRA_MIC_ENABLED, pendingMicEnabled)
             putExtra(BroadcastService.EXTRA_PROJECTION_DATA, projectionData)
         }
-        androidx.core.content.ContextCompat.startForegroundService(this, intent)
+        ContextCompat.startForegroundService(this, intent)
 
         setInputsEnabled(false)
     }
@@ -217,10 +288,43 @@ class MainActivity : AppCompatActivity() {
         binding.inputRoomId.isEnabled = enabled
         binding.btnRegenRoom.isEnabled = enabled
         binding.inputPassword.isEnabled = enabled
-        binding.toggleSource.isEnabled = enabled
-        binding.btnSourceCamera.isEnabled = enabled
-        binding.btnSourceScreen.isEnabled = enabled
-        binding.switchInternalAudio.isEnabled = enabled && useScreenSource
+        // Los botones de fuente/audio se quedan SIEMPRE activos: antes de arrancar
+        // sirven para elegir con qué fuente empezar, y con la emisión ya en marcha
+        // sirven para cambiar en caliente sin cortar nada.
+    }
+
+    // ---- Pintado de los botones grandes de fuente/audio ----
+
+    private fun currentSource(): VideoSource {
+        val state = BroadcastEngine.stateFlow.value
+        return if (state.isRunning) state.activeSource else pendingSource
+    }
+
+    private fun currentMic(): Boolean {
+        val state = BroadcastEngine.stateFlow.value
+        return if (state.isRunning) state.micEnabled else pendingMicEnabled
+    }
+
+    // Encendido = amarillo, apagado = morado — así se ve de un vistazo qué fuente/
+    // audio está activo ahora mismo sin tener que leer texto.
+    private fun tintButton(button: MaterialButton, on: Boolean, enabled: Boolean = true) {
+        val bgColorRes = if (on) R.color.state_on else R.color.state_off
+        val textColorRes = if (on) R.color.state_on_text else R.color.state_off_text
+        button.backgroundTintList = ColorStateList.valueOf(ContextCompat.getColor(this, bgColorRes))
+        button.setTextColor(ContextCompat.getColor(this, textColorRes))
+        button.isEnabled = enabled
+        button.alpha = if (enabled) 1f else 0.45f
+    }
+
+    private fun updateSourceButtonStates() {
+        val src = currentSource()
+        tintButton(binding.btnSourceFront, src == VideoSource.FRONT_CAMERA)
+        tintButton(binding.btnSourceBack, src == VideoSource.BACK_CAMERA)
+        tintButton(binding.btnSourceScreen, src == VideoSource.SCREEN)
+    }
+
+    private fun updateAudioButtonStates() {
+        tintButton(binding.btnToggleMic, currentMic())
     }
 
     // ---- Observar el estado de la emisión ----
@@ -230,7 +334,11 @@ class MainActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 BroadcastEngine.stateFlow.collect { state ->
                     pendingStart = false
-                    binding.btnStartStop.text = if (state.isLive) "Detener" else "Iniciar transmisión"
+                    // "isRunning" es true desde que la cámara/micrófono ya están encendidos,
+                    // aunque todavía no se haya confirmado la conexión con el servidor
+                    // (fase "Conectando…"). Así el botón dice "Detener" durante todo el
+                    // tiempo real que algo está grabando, no solo cuando ya hay espectadores.
+                    binding.btnStartStop.text = if (state.isRunning) "Detener" else "Iniciar transmisión"
                     binding.txtStatus.text = state.error ?: state.statusText
 
                     if (state.isLive && state.viewerUrl != null) {
@@ -242,14 +350,13 @@ class MainActivity : AppCompatActivity() {
                             else -> "${state.viewerCount} personas viendo"
                         }
                         loadQrIfNeeded(state.viewerUrl)
-                    } else if (!state.isLive) {
+                    } else if (!state.isRunning) {
                         binding.cardShare.visibility = android.view.View.GONE
                         setInputsEnabled(true)
                     }
 
-                    if (state.internalAudioFile != null) {
-                        // Aviso discreto una sola vez cuando termina de guardarse el archivo.
-                    }
+                    updateSourceButtonStates()
+                    updateAudioButtonStates()
                 }
             }
         }

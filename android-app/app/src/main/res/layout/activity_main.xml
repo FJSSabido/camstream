@@ -17,186 +17,196 @@
             android:layout_height="wrap_content"
             android:text="CamStream"
             android:textColor="@color/text_primary"
-            android:textSize="24sp"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:layout_marginBottom="20dp"
             android:text="Comparte tu cámara o pantalla mediante una URL"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
 
-        <!-- Servidor -->
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="URL del servidor (ej: https://tu-servidor.onrender.com)"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/inputServerUrl"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textUri"
-                android:singleLine="true" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <!-- Sala -->
+        <!-- Tarjeta: Conexión -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="18dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🌐 Conexión"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
 
             <com.google.android.material.textfield.TextInputLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="Sala"
+                android:layout_marginTop="14dp"
+                android:hint="URL del servidor (ej: https://tu-servidor.onrender.com)"
                 style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
                 <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/inputRoomId"
+                    android:id="@+id/inputServerUrl"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:inputType="textUri"
                     android:singleLine="true" />
             </com.google.android.material.textfield.TextInputLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnRegenRoom"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="🎲" />
-        </LinearLayout>
-
-        <!-- Contraseña opcional -->
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:hint="Contraseña de la sala (opcional)"
-            app:endIconMode="password_toggle"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/inputPassword"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:inputType="textPassword"
-                android:singleLine="true" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-        <!-- Fuente: cámara o pantalla -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Fuente de vídeo"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:hint="Sala"
+                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/inputRoomId"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.button.MaterialButtonToggleGroup
-            android:id="@+id/toggleSource"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            app:selectionRequired="true"
-            app:singleSelection="true">
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRegenRoom"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="🎲" />
+            </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnSourceCamera"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:checked="true"
-                android:text="📷 Cámara" />
+                android:layout_marginTop="12dp"
+                android:hint="Contraseña de la sala (opcional)"
+                app:endIconMode="password_toggle"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inputPassword"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textPassword"
+                    android:singleLine="true" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnSourceScreen"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="🖥️ Pantalla" />
-        </com.google.android.material.button.MaterialButtonToggleGroup>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSwitchCamera"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="🔄 Cambiar a cámara delantera/trasera" />
-
-        <!-- Audio -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Audio"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
+        <!-- Tarjeta: Fuente y audio, con botones grandes que cambian de color según su
+             estado (encendido/apagado) y permiten cambiar EN CALIENTE, sin cortar la
+             transmisión si ya está en marcha. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_card"
+            android:orientation="vertical"
+            android:padding="18dp">
+
             <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Micrófono"
-                android:textColor="@color/text_primary" />
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/switchMic"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                app:showText="false"
-                android:checked="true" />
-        </LinearLayout>
+                android:text="🎛️ Fuente y audio"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
 
-        <LinearLayout
-            android:id="@+id/rowInternalAudio"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
             <TextView
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Audio interno del móvil (experimental)"
-                android:textColor="@color/text_primary" />
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/switchInternalAudio"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                app:showText="false"
-                android:checked="false" />
-        </LinearLayout>
+                android:layout_marginTop="2dp"
+                android:text="Toca para cambiar sin cortar la transmisión. Solo una cámara/pantalla activa a la vez."
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
 
-        <TextView
-            android:id="@+id/txtInternalAudioHint"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Solo con vídeo de pantalla. Requiere Android 10+ y puede no funcionar en todos los dispositivos."
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSourceFront"
+                    android:layout_width="0dp"
+                    android:layout_height="78dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="6dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:gravity="center"
+                    android:lineSpacingExtra="2dp"
+                    android:maxLines="2"
+                    android:text="🤳\nFrontal"
+                    android:textAllCaps="false"
+                    android:textSize="13sp"
+                    app:cornerRadius="16dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSourceBack"
+                    android:layout_width="0dp"
+                    android:layout_height="78dp"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="6dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:gravity="center"
+                    android:lineSpacingExtra="2dp"
+                    android:maxLines="2"
+                    android:text="📷\nTrasera"
+                    android:textAllCaps="false"
+                    android:textSize="13sp"
+                    app:cornerRadius="16dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSourceScreen"
+                    android:layout_width="0dp"
+                    android:layout_height="78dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:gravity="center"
+                    android:lineSpacingExtra="2dp"
+                    android:maxLines="2"
+                    android:text="🖥️\nPantalla"
+                    android:textAllCaps="false"
+                    android:textSize="13sp"
+                    app:cornerRadius="16dp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnToggleMic"
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:layout_marginTop="10dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:gravity="center"
+                android:maxLines="2"
+                android:text="🎙️ Micrófono"
+                android:textAllCaps="false"
+                android:textSize="13sp"
+                app:cornerRadius="16dp" />
+        </LinearLayout>
 
         <!-- Botón principal -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnStartStop"
             android:layout_width="match_parent"
             android:layout_height="56dp"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="22dp"
             android:text="Iniciar transmisión"
             android:textSize="16sp"
             app:cornerRadius="14dp" />
@@ -216,24 +226,25 @@
             android:id="@+id/cardShare"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="14dp"
             android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="16dp"
+            android:padding="18dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Enlace para ver la transmisión"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
+                android:text="🔗 Enlace para ver la transmisión"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/txtViewerUrl"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="8dp"
                 android:textColor="@color/accent"
                 android:textIsSelectable="true"
                 android:textSize="14sp" />
@@ -251,7 +262,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="14dp"
                 android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
@@ -278,6 +289,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:layout_marginBottom="4dp"
             android:gravity="center"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
