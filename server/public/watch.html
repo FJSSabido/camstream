@@ -408,6 +408,15 @@
     if (pc) pc.close();
     pc = new RTCPeerConnection(rtcConfig);
 
+    // Safari/WebKit tiene un fallo conocido con conexiones que SOLO reciben
+    // (como esta página: nunca manda cámara ni micrófono propios) — a veces no
+    // llega a generar candidatos ICE ni completa la conexión si no hay ya
+    // "transceivers" declarados ANTES de procesar la oferta que llega del móvil.
+    // En Chrome/Firefox no hace falta y no molesta declararlo igualmente: es
+    // justo lo que ya iba a pasar en cuanto llegara la oferta con vídeo/audio.
+    pc.addTransceiver('video', { direction: 'recvonly' });
+    pc.addTransceiver('audio', { direction: 'recvonly' });
+
     pc.onicecandidate = (ev) => {
       if (ev.candidate && ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'candidate', candidate: ev.candidate }));

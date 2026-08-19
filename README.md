@@ -167,6 +167,14 @@ escribe mal, puede volver a intentarlo sin recargar la página.
 
 Una sala = un móvil emitiendo. Pueden verla varias personas a la vez.
 
+**Compatibilidad con Safari:** la página del espectador incluye un arreglo para un fallo
+conocido de Safari/WebKit con páginas que solo RECIBEN vídeo/audio sin mandar nada propio
+(como esta) — sin ese arreglo, Safari a veces se queda sin conectar nunca, sin ningún error
+visible, aunque en Chrome/Firefox funcione perfectamente. Si algún espectador en Safari
+sigue sin ver nada después de esto, comprueba primero que abrió el enlace directamente en
+Safari (no dentro del navegador integrado de WhatsApp/Instagram/etc. al tocar el enlace
+desde esa app — ese navegador integrado no siempre soporta WebRTC igual de bien).
+
 ## Limitaciones conocidas
 
 - **Sin servidor TURN.** Con redes normales (WiFi doméstica, datos móviles) funciona con
