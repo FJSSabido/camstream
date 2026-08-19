@@ -421,6 +421,38 @@
     ws.onerror = () => { ws.close(); };
   }
 
+  // Solo para diagnóstico: escribe en la consola del navegador (F12 → Console)
+  // qué tipo de ruta está usando realmente la conexión ya establecida — "host"
+  // o "srflx" significa conexión DIRECTA (la más rápida), "relay" significa que
+  // está pasando por el servidor TURN de Cloudflare (añade algo de retraso, pero
+  // solo debería pasar en redes donde lo directo no funciona). Vuelve a
+  // comprobarlo unos segundos después por si WebRTC cambia a una ruta mejor una
+  // vez conectado, cosa que puede pasar.
+  async function logConnectionPath(pc, attempt = 0) {
+    try {
+      const stats = await pc.getStats();
+      let pairInfo = null;
+      stats.forEach((report) => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+          const local = stats.get(report.localCandidateId);
+          const remote = stats.get(report.remoteCandidateId);
+          pairInfo = { local: local && local.candidateType, remote: remote && remote.candidateType };
+        }
+      });
+      if (pairInfo) {
+        const viaTurn = pairInfo.local === 'relay' || pairInfo.remote === 'relay';
+        console.log(
+          `[CamStream] Ruta de conexión: local=${pairInfo.local} remoto=${pairInfo.remote} → ` +
+          (viaTurn ? 'usando el servidor TURN (relay)' : 'conexión DIRECTA, sin TURN')
+        );
+      }
+    } catch (e) {
+      console.log('[CamStream] No se pudo leer la ruta de conexión:', e);
+    }
+    // Repetir un par de veces más (a los 3s y 8s) por si la ruta cambia tras la nominación inicial.
+    if (attempt < 2) setTimeout(() => logConnectionPath(pc, attempt + 1), attempt === 0 ? 3000 : 5000);
+  }
+
   function setupPeerConnection() {
     if (pc) pc.close();
     pc = new RTCPeerConnection(rtcConfig);
@@ -473,6 +505,7 @@
         clearTimeout(stuckTimer);
         setStatus('En directo', 'live');
         if (!needsPlayGesture) hideOverlay();
+        logConnectionPath(pc);
         return;
       }
       if (pc.connectionState === 'connecting') {
