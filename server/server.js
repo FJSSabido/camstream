@@ -20,6 +20,45 @@ const { WebSocketServer } = require('ws');
 const PORT = process.env.PORT || 8080;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+// --- Credenciales TURN (Cloudflare Realtime) --------------------------------
+// Sin esto, el móvil y quien mira solo tienen servidores STUN (ver watch.html y
+// WebRtcClient.kt), que solo sirven para conexión DIRECTA (peer-to-peer) — en
+// redes con NAT restrictivo (datos móviles, wifis corporativas...) esa conexión
+// directa puede no llegar a establecerse nunca, y entonces no se ve ni se oye
+// nada aunque todo lo demás funcione bien. Un servidor TURN sirve de "repetidor"
+// para esos casos. Las credenciales son de corta duración y se generan aquí, en
+// el servidor — el secreto (CF_TURN_API_TOKEN) NUNCA se manda al móvil ni al
+// navegador, solo el resultado ya generado.
+const CF_TURN_KEY_ID = process.env.CF_TURN_KEY_ID || '';
+const CF_TURN_API_TOKEN = process.env.CF_TURN_API_TOKEN || '';
+const CF_TURN_TTL_SECONDS = 86400; // 24h: de sobra para cualquier sesión de emisión
+
+async function fetchTurnIceServers() {
+  if (!CF_TURN_KEY_ID || !CF_TURN_API_TOKEN) return []; // no configurado: seguimos solo con STUN
+  try {
+    const resp = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN_KEY_ID}/credentials/generate-ice-servers`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${CF_TURN_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ttl: CF_TURN_TTL_SECONDS }),
+      }
+    );
+    if (!resp.ok) {
+      console.error(`Cloudflare TURN: respuesta ${resp.status} al pedir credenciales`);
+      return [];
+    }
+    const data = await resp.json();
+    return Array.isArray(data.iceServers) ? data.iceServers : [];
+  } catch (err) {
+    console.error('Cloudflare TURN: fallo al pedir credenciales', err);
+    return []; // ante cualquier fallo, mejor seguir solo con STUN que romper la conexión
+  }
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -48,6 +87,18 @@ const httpServer = http.createServer((req, res) => {
   if (pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
+    return;
+  }
+
+  // Lo consultan tanto watch.html como la app antes de conectar, para saber si
+  // hay un servidor TURN disponible además de los STUN fijos que ya llevan
+  // incorporados. Si no está configurado (o falla), devuelve la lista vacía en
+  // vez de un error — así nunca bloquea la conexión, solo deja de tener TURN.
+  if (pathname === '/turn-credentials') {
+    fetchTurnIceServers().then((iceServers) => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ iceServers }));
+    });
     return;
   }
 

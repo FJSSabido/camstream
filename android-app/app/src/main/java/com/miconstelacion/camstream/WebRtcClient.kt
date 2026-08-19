@@ -40,7 +40,15 @@ import org.webrtc.audio.JavaAudioDeviceModule
  */
 class WebRtcClient(
     private val context: Context,
-    private val listener: Listener
+    private val listener: Listener,
+    // Servidores TURN adicionales, obtenidos del propio servidor de señalización
+    // (ver BroadcastEngine.fetchTurnIceServers) antes de crear este cliente. Con
+    // solo STUN (los de abajo) la conexión únicamente sirve si se consigue
+    // establecer DIRECTA entre el móvil y quien mira — en redes con NAT
+    // restrictivo eso puede no llegar a pasar nunca. Vacío si el servidor no
+    // tiene TURN configurado (o si aún no se ha podido consultar): la app
+    // sigue funcionando igual que antes, solo sin ese repetidor de más.
+    extraIceServers: List<PeerConnection.IceServer> = emptyList()
 ) {
     interface Listener {
         fun onLocalIceCandidate(viewerId: String, candidate: IceCandidate)
@@ -89,7 +97,7 @@ class WebRtcClient(
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-    )
+    ) + extraIceServers
 
     fun initialize() {
         eglBase = EglBase.create()

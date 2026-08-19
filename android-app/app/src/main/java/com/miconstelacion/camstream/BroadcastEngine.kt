@@ -3,7 +3,14 @@ package com.miconstelacion.camstream
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import org.webrtc.PeerConnection
 
 private const val TAG = "BroadcastEngine"
 
@@ -39,6 +46,11 @@ object BroadcastEngine {
 
     private var webRtcClient: WebRtcClient? = null
     private var signalingClient: SignalingClient? = null
+    // Se incrementa en cada start()/stop(): si una consulta TURN todavía en vuelo
+    // (ver fetchTurnIceServers) responde tarde, comparando este número se sabe si
+    // sigue hablando de LA MISMA emisión o si ya se paró/arrancó otra mientras
+    // tanto — evita que una respuesta tardía pise un estado más nuevo.
+    private var startGeneration = 0
 
     fun start(
         context: Context,
@@ -58,6 +70,33 @@ object BroadcastEngine {
             activeSource = source, micEnabled = micEnabled
         )
 
+        val generation = ++startGeneration
+        // La consulta al servidor por si hay TURN configurado (ver
+        // /turn-credentials en server.js) es una llamada de red: va en un hilo de
+        // fondo para no bloquear el hilo principal. Cámara/WebRTC sí necesitan
+        // seguir tocándose desde el hilo principal como siempre (por eso
+        // startAfterTurnLookup vuelve a Dispatchers.Main antes de continuar).
+        CoroutineScope(Dispatchers.IO).launch {
+            val extraIceServers = fetchTurnIceServers(serverUrl)
+            withContext(Dispatchers.Main) {
+                if (generation != startGeneration) return@withContext // ya no es la emisión actual
+                startAfterTurnLookup(
+                    appContext, serverUrl, room, password, source, micEnabled, projectionData, extraIceServers
+                )
+            }
+        }
+    }
+
+    private fun startAfterTurnLookup(
+        appContext: Context,
+        serverUrl: String,
+        room: String,
+        password: String,
+        source: VideoSource,
+        micEnabled: Boolean,
+        projectionData: Intent?,
+        extraIceServers: List<PeerConnection.IceServer>
+    ) {
         val client = WebRtcClient(appContext, object : WebRtcClient.Listener {
             override fun onLocalIceCandidate(viewerId: String, candidate: org.webrtc.IceCandidate) {
                 signalingClient?.sendCandidate(viewerId, candidate)
@@ -65,7 +104,7 @@ object BroadcastEngine {
             override fun onLocalOffer(viewerId: String, sdp: String) {
                 signalingClient?.sendOffer(viewerId, sdp)
             }
-        })
+        }, extraIceServers)
         webRtcClient = client
 
         try {
@@ -217,6 +256,10 @@ object BroadcastEngine {
      * saber por qué ha dejado de estar "en directo".
      */
     private fun stopInternal(errorMessage: String?) {
+        // Invalida cualquier consulta TURN todavía en vuelo de un start() anterior
+        // (ver comentario en startGeneration) — si responde después de esto, su
+        // comprobación de generación fallará y no hará nada.
+        startGeneration++
         if (errorMessage != null) {
             // Traza con pila de llamada para saber, en Logcat, DESDE DÓNDE se ha
             // disparado una parada con error (señalización, captura, etc.) sin tener
@@ -233,5 +276,59 @@ object BroadcastEngine {
     private fun buildViewerUrl(serverUrl: String, room: String): String {
         val base = serverUrl.trim().removeSuffix("/")
         return "$base/watch/${java.net.URLEncoder.encode(room, "UTF-8")}"
+    }
+
+    /**
+     * Pregunta al propio servidor de señalización (endpoint /turn-credentials,
+     * ver server.js) si tiene un servidor TURN configurado (Cloudflare Realtime).
+     * Solo STUN (lo que ya llevaba WebRtcClient de fábrica) sirve únicamente si
+     * se consigue conexión DIRECTA entre el móvil y quien mira — en redes con NAT
+     * restrictivo (datos móviles, wifis corporativas) eso puede no llegar a pasar
+     * nunca, y entonces no se ve ni se oye nada aunque todo lo demás vaya bien.
+     * Llamada de red BLOQUEANTE a propósito: se invoca desde Dispatchers.IO en
+     * [start], nunca desde el hilo principal. Ante cualquier fallo (sin
+     * conexión, servidor sin TURN configurado, timeout...) devuelve la lista
+     * vacía — nunca bloquea ni corta el arranque de la emisión por esto, sigue
+     * funcionando solo con STUN igual que antes.
+     */
+    private fun fetchTurnIceServers(serverUrl: String): List<PeerConnection.IceServer> {
+        return try {
+            val base = serverUrl.trim().removeSuffix("/")
+            val url = java.net.URL("$base/turn-credentials")
+            val conn = url.openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 4000
+            conn.readTimeout = 4000
+            conn.requestMethod = "GET"
+            try {
+                val code = conn.responseCode
+                if (code !in 200..299) return emptyList()
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseIceServers(body)
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "No se pudieron obtener credenciales TURN (se sigue solo con STUN): ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun parseIceServers(body: String): List<PeerConnection.IceServer> {
+        val arr = JSONObject(body).optJSONArray("iceServers") ?: return emptyList()
+        val result = mutableListOf<PeerConnection.IceServer>()
+        for (i in 0 until arr.length()) {
+            val entry = arr.optJSONObject(i) ?: continue
+            val urls = mutableListOf<String>()
+            when (val u = entry.opt("urls")) {
+                is JSONArray -> for (j in 0 until u.length()) urls.add(u.getString(j))
+                is String -> urls.add(u)
+            }
+            if (urls.isEmpty()) continue
+            val builder = PeerConnection.IceServer.builder(urls)
+            entry.optString("username", "").takeIf { it.isNotEmpty() }?.let { builder.setUsername(it) }
+            entry.optString("credential", "").takeIf { it.isNotEmpty() }?.let { builder.setPassword(it) }
+            result.add(builder.createIceServer())
+        }
+        return result
     }
 }

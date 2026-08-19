@@ -271,12 +271,29 @@
     return;
   }
 
-  const rtcConfig = {
+  // Empezamos solo con STUN (válido para conexión directa en redes normales);
+  // loadTurnIceServers() añade un TURN de verdad antes de conectar, si el
+  // servidor lo tiene configurado (ver /turn-credentials en server.js) — sin
+  // TURN, en redes muy restrictivas (datos móviles, wifis corporativas) la
+  // conexión puede quedarse sin establecerse nunca, sin ningún error visible.
+  let rtcConfig = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' }
     ]
   };
+
+  async function loadTurnIceServers() {
+    try {
+      const resp = await fetch('/turn-credentials');
+      const data = await resp.json();
+      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        rtcConfig = { iceServers: [...rtcConfig.iceServers, ...data.iceServers] };
+      }
+    } catch (e) {
+      // Sin TURN seguimos con los STUN de siempre — no bloqueamos la conexión por esto.
+    }
+  }
 
   let pc = null;
   let ws = null;
@@ -423,22 +440,28 @@
       }
     };
 
+    let needsPlayGesture = false;
+    let stuckTimer = null;
+
     pc.ontrack = (ev) => {
+      // OJO: "ontrack" solo dice que WebRTC ha NEGOCIADO una pista (por la SDP),
+      // NO que los datos de vídeo/audio estén llegando de verdad — eso puede
+      // fallar aparte si la conexión ICE no consigue atravesar la red (típico en
+      // redes restrictivas sin servidor TURN). Por eso aquí NO marcamos "En
+      // directo" todavía: eso se hace más abajo, en onconnectionstatechange,
+      // que es la señal real de que hay conexión de verdad.
       gotStream = true;
       videoEl.srcObject = ev.streams[0];
-      // El mensaje "state" (ver ws.onmessage) es la fuente autorizada de si hay
-      // vídeo/audio — esto es solo un respaldo por si, por lo que sea, todavía no
-      // ha llegado ningún "state" cuando entra la primera pista.
       if (knownHasVideo === null) {
         knownHasVideo = ev.streams[0].getVideoTracks().length > 0;
         updateSignalBadges();
       }
       layoutVideo();
-      hideOverlay();
-      setStatus('En directo', 'live');
       videoEl.play().catch(() => {
+        needsPlayGesture = true;
         showOverlay('<p>Toca para activar el sonido y reproducir</p><button class="btn" id="playBtn">Reproducir</button>');
         document.getElementById('playBtn').onclick = () => {
+          needsPlayGesture = false;
           unmuteTo(lastVolume > 0 ? lastVolume : 1);
           hideOverlay();
         };
@@ -446,7 +469,30 @@
     };
 
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        clearTimeout(stuckTimer);
+        setStatus('En directo', 'live');
+        if (!needsPlayGesture) hideOverlay();
+        return;
+      }
+      if (pc.connectionState === 'connecting') {
+        // Si tarda demasiado en conectar de verdad, lo más probable es una red
+        // muy restrictiva que necesitaría un servidor TURN (ver README) — mejor
+        // avisar de eso que dejar el spinner girando sin explicación.
+        clearTimeout(stuckTimer);
+        stuckTimer = setTimeout(() => {
+          if (pc.connectionState !== 'connected') {
+            showOverlay(
+              '<div class="spinner"></div>' +
+              '<p>La conexión está tardando más de lo normal. Puede deberse a una red muy ' +
+              'restrictiva (WiFi corporativa, ciertas redes 4G/5G) — seguimos intentándolo.</p>'
+            );
+          }
+        }, 8000);
+      }
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        clearTimeout(stuckTimer);
+        needsPlayGesture = false;
         gotStream = false;
         setStatus('Reconectando…', 'off');
       }
@@ -459,7 +505,10 @@
     if (videoEl.muted) unmuteTo(lastVolume > 0 ? lastVolume : 1);
   });
 
-  connect();
+  // Pedimos primero el TURN (si lo hay) y solo entonces conectamos — así, para
+  // cuando llegue la oferta del móvil, rtcConfig ya está completo. El propio
+  // fetch tiene su try/catch, así que esto nunca se queda colgado esperando.
+  loadTurnIceServers().then(connect);
 })();
 </script>
 </body>

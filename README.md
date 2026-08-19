@@ -175,14 +175,31 @@ sigue sin ver nada después de esto, comprueba primero que abrió el enlace dire
 Safari (no dentro del navegador integrado de WhatsApp/Instagram/etc. al tocar el enlace
 desde esa app — ese navegador integrado no siempre soporta WebRTC igual de bien).
 
+### Servidor TURN (Cloudflare Realtime)
+
+Con redes normales (WiFi doméstica, datos móviles) la conexión directa entre el móvil y
+quien mira funciona solo con los servidores STUN públicos incluidos. Pero en redes con NAT
+restrictivo (datos móviles de algunos operadores, WiFis corporativas...) esa conexión
+directa puede no llegar a establecerse nunca — se ve "En directo" pero la imagen queda en
+negro y sin sonido, porque ninguno de los dos lados consigue encontrar al otro. Para esos
+casos el servidor puede repartir credenciales de un servidor TURN (que hace de repetidor)
+usando el servicio gratuito de Cloudflare Realtime (1000 GB/mes gratis):
+
+1. Crea una "TURN Key" en el panel de Cloudflare (sección Realtime/Calls) — te da un
+   **Key ID** y un **API Token**.
+2. En Render (o donde tengas desplegado el servidor): **Environment → Add Environment
+   Variable** y añade `CF_TURN_KEY_ID` y `CF_TURN_API_TOKEN` con esos valores. No los
+   compartas ni los subas a git — solo viven como variables de entorno del servidor.
+3. Redespliega el servicio para que recoja las nuevas variables.
+
+Con eso configurado, tanto la app como `watch.html` piden automáticamente credenciales
+TURN de corta duración a `/turn-credentials` antes de conectar, y las añaden a las que ya
+tenían de STUN. El secreto (`CF_TURN_API_TOKEN`) nunca sale del servidor: lo único que
+viaja al móvil o al navegador son credenciales ya generadas y de validez limitada (24h). Si
+no configuras esas variables, todo sigue funcionando igual que antes, solo con STUN.
+
 ## Limitaciones conocidas
 
-- **Sin servidor TURN.** Con redes normales (WiFi doméstica, datos móviles) funciona con
-  los servidores STUN públicos incluidos. En redes muy restrictivas (WiFi corporativas,
-  algunas 4G/5G con NAT simétrico) puede que la conexión P2P no consiga establecerse. Si
-  te pasa, la solución es añadir un servidor TURN (por ejemplo, el gratuito de
-  https://www.metered.ca/tools/openrelay/) en la lista `iceServers` de
-  `WebRtcClient.kt` y de `watch.html`.
 - **Una emisión por sala.** Si dos móviles intentan usar la misma sala a la vez, el
   segundo recibe un error. Usa nombres de sala distintos si vais a emitir varias
   personas.
