@@ -175,6 +175,23 @@ sigue sin ver nada después de esto, comprueba primero que abrió el enlace dire
 Safari (no dentro del navegador integrado de WhatsApp/Instagram/etc. al tocar el enlace
 desde esa app — ese navegador integrado no siempre soporta WebRTC igual de bien).
 
+### Chat en directo
+
+Debajo del vídeo (en el navegador) o bajando del todo en la app (en la tarjeta **💬 Chat
+en directo**, que aparece en cuanto la emisión está confirmada como en directo) hay un chat
+compartido: lo ve todo el mundo a la vez — el anfitrión y cada espectador conectado —, como
+el chat de cualquier directo normal. No es un mensaje privado al anfitrión: si un
+espectador escribe algo, también lo ven los demás espectadores, no solo quien emite.
+
+Cualquier espectador puede poner un nombre (campo "Tu nombre", opcional — el navegador lo
+recuerda para la próxima vez que entre; si lo deja en blanco aparece como "Invitado"). El
+anfitrión puede tanto leer como responder desde la misma tarjeta de la app. Los mensajes
+del anfitrión se distinguen con un borde amarillo y la etiqueta "Anfitrión". El historial
+del chat es solo de la emisión actual: se vacía cada vez que se inicia una nueva
+transmisión, y no se guarda en ningún sitio una vez terminada (no hay base de datos: los
+mensajes viajan por el mismo servidor de señalización que el resto de avisos pequeños,
+igual que los iconos de "sin señal", nunca por el vídeo/audio en sí).
+
 ### Servidor TURN (Cloudflare Realtime)
 
 Con redes normales (WiFi doméstica, datos móviles) la conexión directa entre el móvil y

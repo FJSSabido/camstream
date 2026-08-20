@@ -214,11 +214,19 @@ wss.on('connection', (ws, req) => {
     if (!r) return;
 
     if (ws.role === 'host') {
-      if (msg.type === 'state' && !msg.viewerId) {
+      if ((msg.type === 'state' || msg.type === 'chat') && !msg.viewerId) {
         // A diferencia de offer/answer/candidate (dirigidos a un viewer concreto
-        // con msg.viewerId), un cambio de estado — se ha encendido o apagado el
-        // vídeo o el micrófono — se avisa a TODOS los espectadores conectados a
-        // la vez, para que cada uno actualice sus iconos de "sin señal".
+        // con msg.viewerId), estos van a TODOS los espectadores conectados a la
+        // vez: 'state' para que cada uno actualice sus iconos de "sin señal", y
+        // 'chat' cuando el propio anfitrión escribe algo — es un chat compartido,
+        // lo ve todo el mundo, no un mensaje privado a un espectador concreto.
+        if (msg.type === 'chat') {
+          const text = String(msg.text || '').slice(0, 500).trim();
+          if (!text) return;
+          msg.text = text;
+          msg.name = 'Anfitrión';
+          msg.ts = Date.now();
+        }
         for (const viewer of r.viewers.values()) send(viewer, msg);
         return;
       }
@@ -230,6 +238,19 @@ wss.on('connection', (ws, req) => {
     } else {
       // El viewer manda mensajes al host; el servidor añade su viewerId
       msg.viewerId = ws.viewerId;
+      if (msg.type === 'chat') {
+        // Chat compartido: el mensaje de un espectador lo ve el anfitrión Y
+        // también el resto de espectadores (como el chat de un directo normal),
+        // no solo el anfitrión. Se sanea texto/nombre por si acaso.
+        const text = String(msg.text || '').slice(0, 500).trim();
+        if (!text) return;
+        msg.text = text;
+        msg.name = String(msg.name || '').slice(0, 40).trim() || 'Invitado';
+        msg.ts = Date.now();
+        if (r.hostWs) send(r.hostWs, msg);
+        for (const viewer of r.viewers.values()) send(viewer, msg);
+        return;
+      }
       if (r.hostWs) send(r.hostWs, msg);
     }
   });

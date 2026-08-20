@@ -17,6 +17,15 @@ private const val TAG = "BroadcastEngine"
 /** Las tres fuentes de vídeo posibles. Nunca hay dos activas a la vez. */
 enum class VideoSource { NONE, FRONT_CAMERA, BACK_CAMERA, SCREEN }
 
+/** Un mensaje del chat compartido — de un espectador o del propio anfitrión. */
+data class ChatMessage(
+    val fromHost: Boolean,
+    val name: String,
+    val text: String,
+    val ts: Long,
+    val viewerId: String? = null
+)
+
 data class BroadcastState(
     // true desde el instante en que se intenta arrancar (cámara/pantalla + micrófono ya
     // en marcha) hasta que se detiene o falla del todo. Es lo que debe usar la UI para
@@ -44,6 +53,12 @@ object BroadcastEngine {
 
     val stateFlow = MutableStateFlow(BroadcastState())
 
+    // Historial del chat compartido de la emisión actual — se vacía en cada
+    // start() (sala/emisión nueva = chat nuevo). Se limita a los últimos 200
+    // mensajes para no crecer sin límite en una emisión muy larga.
+    val chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    private const val MAX_CHAT_MESSAGES = 200
+
     private var webRtcClient: WebRtcClient? = null
     private var signalingClient: SignalingClient? = null
     // Se incrementa en cada start()/stop(): si una consulta TURN todavía en vuelo
@@ -62,6 +77,8 @@ object BroadcastEngine {
         projectionData: Intent?
     ) {
         stop()
+
+        chatMessages.value = emptyList() // sala/emisión nueva = chat nuevo, sin arrastrar el anterior
 
         val appContext = context.applicationContext
         val viewerUrl = buildViewerUrl(serverUrl, room)
@@ -179,6 +196,10 @@ object BroadcastEngine {
                 if (signalingClient !== thisClient) return
                 stopInternal("Desconectado")
             }
+            override fun onChat(viewerId: String, name: String, text: String, ts: Long) {
+                if (signalingClient !== thisClient) return
+                appendChatMessage(ChatMessage(fromHost = false, name = name, text = text, ts = ts, viewerId = viewerId))
+            }
         })
         signalingClient = thisClient
         thisClient.connect()
@@ -244,6 +265,24 @@ object BroadcastEngine {
         webRtcClient?.setMicEnabled(enabled)
         stateFlow.value = stateFlow.value.copy(micEnabled = enabled)
         broadcastState()
+    }
+
+    /**
+     * Manda un mensaje del anfitrión a todo el chat compartido (lo ven todos los
+     * espectadores conectados, igual que en watch.html). Se añade también al
+     * historial local de inmediato — no hace falta esperar a que "vuelva" del
+     * servidor, a diferencia de los mensajes de los espectadores.
+     */
+    fun sendChat(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty() || !stateFlow.value.isRunning) return
+        signalingClient?.sendChat(trimmed)
+        appendChatMessage(ChatMessage(fromHost = true, name = "Anfitrión", text = trimmed, ts = System.currentTimeMillis()))
+    }
+
+    private fun appendChatMessage(msg: ChatMessage) {
+        val updated = (chatMessages.value + msg)
+        chatMessages.value = if (updated.size > MAX_CHAT_MESSAGES) updated.takeLast(MAX_CHAT_MESSAGES) else updated
     }
 
     /** Parada "normal": vacía el estado por completo, sin mensaje de error. */

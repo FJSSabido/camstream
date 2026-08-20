@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Burbuja de un mensaje de chat de un espectador (no del anfitrión, ver
+     bg_chat_bubble_host.xml para ese caso). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/surface_alt" />
+    <corners android:radius="12dp" />
+</shape>

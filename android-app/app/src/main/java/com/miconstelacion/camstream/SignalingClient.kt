@@ -20,6 +20,10 @@ interface SignalingListener {
     fun onRemoteCandidate(viewerId: String, candidate: IceCandidateData)
     fun onSignalingError(message: String)
     fun onSignalingClosed()
+    /** Mensaje de chat de un espectador (nunca del propio anfitrión: sus mensajes
+     *  los añade la app localmente en cuanto los envía, no hace falta esperar a
+     *  que vuelvan del servidor). */
+    fun onChat(viewerId: String, name: String, text: String, ts: Long)
 }
 
 /**
@@ -97,6 +101,12 @@ class SignalingClient(
                     )
                 }
                 "error" -> listener.onSignalingError(json.optString("message", "Error del servidor"))
+                "chat" -> listener.onChat(
+                    json.optString("viewerId"),
+                    json.optString("name", "Invitado"),
+                    json.optString("text", ""),
+                    json.optLong("ts", System.currentTimeMillis())
+                )
             }
         }
     }
@@ -124,6 +134,16 @@ class SignalingClient(
         val json = JSONObject().put("type", "state").put("hasVideo", hasVideo).put("hasAudio", hasAudio)
         if (viewerId != null) json.put("viewerId", viewerId)
         send(json)
+    }
+
+    /**
+     * Manda un mensaje de chat del ANFITRIÓN a todos los espectadores conectados
+     * (chat compartido: lo ve todo el mundo, igual que en watch.html). El propio
+     * mensaje NO vuelve aquí — [BroadcastEngine.sendChat] lo añade en local en
+     * cuanto se llama a esto, sin esperar respuesta del servidor.
+     */
+    fun sendChat(text: String) {
+        send(JSONObject().put("type", "chat").put("text", text))
     }
 
     private fun send(json: JSONObject) {
